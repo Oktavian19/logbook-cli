@@ -62,8 +62,8 @@ Sebelum menggunakan CLI di laptop, daftarkan akun DERMAGA Anda melalui bot Teleg
 
 Tidak perlu menginstal Python atau dependensi apapun! Cukup unduh paket binary siap pakai dari GitHub Releases:
 
-* 🪟 **Windows (x64)**: [logbook-cli-windows-x64.zip](https://github.com/Oktavian19/bot-services/releases/download/cli-latest/logbook-cli-windows-x64.zip)
-* 🐧 **Linux (x64)**: [logbook-cli-linux-x64.zip](https://github.com/Oktavian19/bot-services/releases/download/cli-latest/logbook-cli-linux-x64.zip)
+* 🪟 **Windows (x64)**: [logbook-cli-windows-x64.zip](https://github.com/Oktavian19/logbook-cli/releases/download/cli-latest/logbook-cli-windows-x64.zip)
+* 🐧 **Linux (x64)**: [logbook-cli-linux-x64.zip](https://github.com/Oktavian19/logbook-cli/releases/download/cli-latest/logbook-cli-linux-x64.zip)
 
 **Cara Ekstrak:**
 * **Windows**: Klik kanan file ZIP ➡️ **Extract All...** ke folder pilihan Anda (misalnya `D:\LogbookCLI` atau `C:\Tools\LogbookCLI`).
