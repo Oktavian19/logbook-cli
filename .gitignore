@@ -1,0 +1,12 @@
+# Runtime config & credentials
+config.json
+
+# Local SQLite pending queue
+*.db
+pending_queue.db
+
+# Python cache & virtualenv
+__pycache__/
+*.py[cod]
+.venv/
+venv/

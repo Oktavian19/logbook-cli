@@ -1,0 +1,9 @@
+[Unit]
+Description=Jalankan Git Logbook Automation Setiap Hari Jam 16:00 WIB
+
+[Timer]
+OnCalendar=*-*-* 16:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

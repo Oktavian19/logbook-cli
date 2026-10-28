@@ -1,0 +1,11 @@
+[Unit]
+Description=Automated Daily Git Logbook CLI Runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/oktavian/Project/Script/bot-services
+ExecStart=/usr/bin/python3 /home/oktavian/Project/Script/bot-services/tools/logbook_cli/logbook_cli.py run
+StandardOutput=journal
+StandardError=journal
