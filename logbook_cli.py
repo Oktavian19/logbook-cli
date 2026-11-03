@@ -17,7 +17,7 @@ import tempfile
 from pathlib import Path
 from datetime import datetime
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 GITHUB_REPO = "Oktavian19/logbook-cli"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
