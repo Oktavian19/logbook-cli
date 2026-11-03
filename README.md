@@ -218,6 +218,8 @@ Selain mode menu interaktif, Anda juga bisa menjalankan fungsi tertentu langsung
 | Perintah | Deskripsi |
 |---|---|
 | `logbook_cli --version` / `-v` | Tampilkan versi Logbook CLI saat ini. |
+| `logbook_cli update` | Periksa dan lakukan pembaruan (*self-update*) otomatis ke versi terbaru. |
+| `logbook_cli update --check` | Cek ketersediaan versi rilis terbaru tanpa melakukan update. |
 | `logbook_cli scan` | Pindai semua folder proyek Git lokal & cek status commit hari ini. |
 | `logbook_cli preview` | Tampilkan draf ringkasan logbook hari ini di terminal (tanpa kirim ke Telegram). |
 | `logbook_cli preview --date 2026-10-25` | Preview draf logbook untuk tanggal spesifik lampau. |
