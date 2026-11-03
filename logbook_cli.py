@@ -11,10 +11,17 @@ import urllib.error
 import time
 import ssl
 import socket
+import shutil
+import zipfile
+import tempfile
 from pathlib import Path
 from datetime import datetime
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
+
+GITHUB_REPO = "Oktavian19/logbook-cli"
+GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+GITHUB_RAW_SCRIPT = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/logbook_cli.py"
 
 # Prioritaskan IPv4 daripada IPv6 untuk menghindari kegagalan routing/NAT64 atau rekaman DNS AAAA yang bermasalah
 _orig_getaddrinfo = socket.getaddrinfo
@@ -477,12 +484,251 @@ def cmd_scan(args, config):
         print(f"• {name:<18} : {path} {status_commit}")
     print("=" * 65)
 
+def parse_version(ver_str: str) -> tuple:
+    """Mengubah string versi seperti 'v1.0.1' atau '1.0.0' menjadi tuple angka (1, 0, 1)."""
+    ver_clean = ver_str.lstrip("v").strip()
+    parts = []
+    for p in ver_clean.split("."):
+        try:
+            parts.append(int(p))
+        except ValueError:
+            break
+    return tuple(parts)
+
+def cleanup_old_executables():
+    """Membersihkan file .old sisa pembaruan Windows pada proses sebelumnya."""
+    if getattr(sys, "frozen", False):
+        try:
+            old_file = Path(sys.executable + ".old")
+            if old_file.exists():
+                old_file.unlink()
+        except Exception:
+            pass
+
+def check_latest_version(timeout: int = 3) -> dict:
+    """
+    Memeriksa rilis terbaru dari GitHub.
+    Mengembalikan dict dengan status pembaruan dan metadata rilis.
+    """
+    result = {
+        "has_update": False,
+        "latest_version": __version__,
+        "current_version": __version__,
+        "release_notes": "",
+        "assets": [],
+        "tag_name": f"v{__version__}",
+        "error": None
+    }
+    try:
+        req = urllib.request.Request(
+            GITHUB_RELEASES_API,
+            headers={
+                "User-Agent": "Logbook-CLI-Updater",
+                "Accept": "application/vnd.github.v3+json"
+            }
+        )
+        ctx = ssl.create_default_context()
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            tag_name = data.get("tag_name", "")
+            latest_clean = tag_name.lstrip("v")
+            result["latest_version"] = latest_clean
+            result["tag_name"] = tag_name
+            result["release_notes"] = data.get("body", "")
+            result["assets"] = data.get("assets", [])
+
+            if parse_version(latest_clean) > parse_version(__version__):
+                result["has_update"] = True
+    except Exception as e:
+        result["error"] = str(e)
+    return result
+
+def restart_application():
+    """Me-restart aplikasi CLI ke versi terbaru."""
+    print("\n🔄 Memulai ulang Logbook CLI...")
+    time.sleep(0.5)
+    try:
+        if sys.platform == "win32" and getattr(sys, "frozen", False):
+            subprocess.Popen([sys.executable] + sys.argv[1:])
+            sys.exit(0)
+        else:
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+    except Exception as e:
+        print(f"⚠️ Gagal me-restart otomatis: {e}")
+        print("Silakan jalankan ulang Logbook CLI secara manual.")
+        sys.exit(0)
+
+def _download_and_replace_script(target_path: Path):
+    req = urllib.request.Request(GITHUB_RAW_SCRIPT, headers={"User-Agent": "Logbook-CLI-Updater"})
+    ctx = ssl.create_default_context()
+    with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+        content = resp.read()
+    if b"__version__" not in content:
+        raise ValueError("File yang diunduh bukan script Logbook CLI yang valid!")
+    target_path.write_bytes(content)
+
+def perform_self_update(release_info: dict = None, force: bool = False) -> bool:
+    """Melakukan proses unduh dan instalasi pembaruan Logbook CLI."""
+    if not release_info:
+        print("🔍 Memeriksa versi terbaru di GitHub...")
+        release_info = check_latest_version(timeout=5)
+
+    if release_info.get("error") and not force:
+        print(f"❌ Gagal memeriksa pembaruan: {release_info['error']}")
+        return False
+
+    has_update = release_info.get("has_update", False)
+    latest_ver = release_info.get("latest_version", __version__)
+    tag_name = release_info.get("tag_name", f"v{latest_ver}")
+
+    if not has_update and not force:
+        print(f"✅ Anda sudah menggunakan versi terbaru: v{__version__}")
+        return True
+
+    print(f"\n🚀 Memulai pembaruan Logbook CLI (v{__version__} -> v{latest_ver})...")
+    if release_info.get("release_notes"):
+        print("\n📝 Catatan Rilis:")
+        print("-" * 50)
+        notes_lines = [line for line in release_info["release_notes"].strip().split("\n") if line.strip()][:8]
+        print("\n".join(notes_lines))
+        print("-" * 50)
+
+    is_frozen = getattr(sys, "frozen", False)
+
+    try:
+        if is_frozen:
+            # Mode Standalone Executable
+            is_win = sys.platform == "win32"
+            target_asset_name = "logbook-cli-windows-x64.zip" if is_win else "logbook-cli-linux-x64.zip"
+            binary_name = "logbook_cli.exe" if is_win else "logbook_cli"
+
+            download_url = None
+            for asset in release_info.get("assets", []):
+                if asset.get("name") == target_asset_name:
+                    download_url = asset.get("browser_download_url")
+                    break
+
+            if not download_url:
+                download_url = f"https://github.com/{GITHUB_REPO}/releases/download/{tag_name}/{target_asset_name}"
+
+            print(f"📦 Mengunduh paket: {target_asset_name}")
+            print(f"🌐 Dari: {download_url}")
+
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                tmp_dir_path = Path(tmp_dir)
+                zip_path = tmp_dir_path / target_asset_name
+
+                req = urllib.request.Request(download_url, headers={"User-Agent": "Logbook-CLI-Updater"})
+                ctx = ssl.create_default_context()
+                with urllib.request.urlopen(req, timeout=30, context=ctx) as resp, open(zip_path, "wb") as f_out:
+                    total_size = resp.getheader("Content-Length")
+                    total_bytes = int(total_size) if total_size else 0
+                    downloaded = 0
+                    while True:
+                        chunk = resp.read(65536)
+                        if not chunk:
+                            break
+                        f_out.write(chunk)
+                        downloaded += len(chunk)
+                        if total_bytes > 0:
+                            percent = int(downloaded / total_bytes * 100)
+                            print(f"\r⏳ Mengunduh: {percent}% ({downloaded // 1024} KB / {total_bytes // 1024} KB)", end="", flush=True)
+                print("\n✅ Unduhan selesai, mengekstrak binary...")
+
+                with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                    zip_ref.extractall(tmp_dir_path)
+
+                new_binary = tmp_dir_path / binary_name
+                if not new_binary.exists():
+                    raise FileNotFoundError(f"File binary {binary_name} tidak ditemukan di dalam paket rilis!")
+
+                current_exe = Path(sys.executable).resolve()
+                print(f"🔄 Mengganti executable: {current_exe.name}")
+
+                if is_win:
+                    old_exe = Path(str(current_exe) + ".old")
+                    if old_exe.exists():
+                        try:
+                            old_exe.unlink()
+                        except Exception:
+                            pass
+                    current_exe.rename(old_exe)
+                    shutil.copy2(new_binary, current_exe)
+                else:
+                    new_binary.chmod(0o755)
+                    os.replace(new_binary, current_exe)
+
+        else:
+            # Mode Script Python
+            script_path = Path(__file__).resolve()
+            git_dir = BASE_DIR / ".git"
+
+            if git_dir.is_dir():
+                print("🌿 Repositori Git lokal terdeteksi, menjalankan 'git pull'...")
+                res = subprocess.run(["git", "pull"], cwd=BASE_DIR, capture_output=True, text=True)
+                print(res.stdout)
+                if res.returncode != 0:
+                    print(f"⚠️ Git pull gagal ({res.stderr.strip()}), mencoba mengunduh script langsung...")
+                    _download_and_replace_script(script_path)
+            else:
+                print("📥 Mengunduh script terbaru dari GitHub...")
+                _download_and_replace_script(script_path)
+
+        print("\n🎉 Pembaruan berhasil dipasang!")
+
+        # Minta konfirmasi restart
+        try:
+            prompt = input("\n👉 Apakah Anda ingin me-restart Logbook CLI ke versi terbaru sekarang? [Y/n]: ").strip().lower()
+            if prompt in ('', 'y', 'yes'):
+                restart_application()
+        except (KeyboardInterrupt, EOFError):
+            print("\n👋 Pembaruan selesai. Silakan jalankan ulang CLI secara manual.")
+        return True
+
+    except Exception as e:
+        print(f"\n❌ Terjadi kesalahan saat melakukan pembaruan: {e}")
+        return False
+
+def cmd_update(args, config):
+    """Perintah CLI untuk memeriksa atau melakukan pembaruan."""
+    check_only = getattr(args, "check", False)
+    force = getattr(args, "force", False)
+
+    print("🔍 Memeriksa versi terbaru di GitHub...")
+    rel = check_latest_version(timeout=5)
+    if rel.get("error"):
+        print(f"⚠️ Gagal menghubungi server rilis: {rel['error']}")
+        return
+
+    latest_ver = rel["latest_version"]
+    has_update = rel["has_update"]
+
+    print(f"📌 Versi saat ini : v{__version__}")
+    print(f"🌐 Versi terbaru : v{latest_ver}")
+
+    if check_only:
+        if has_update:
+            print(f"\n✨ Pembaruan tersedia! Jalankan 'logbook_cli update' atau pilih menu [6] untuk memperbarui.")
+        else:
+            print("\n✅ Logbook CLI sudah menggunakan versi terbaru.")
+        return
+
+    if not has_update and not force:
+        print("\n✅ Logbook CLI Anda sudah menggunakan versi paling mutakhir.")
+        return
+
+    perform_self_update(release_info=rel, force=force)
+
 # --- INTERACTIVE TERMINAL MENU ---
 
 def run_interactive_menu(config: dict):
     """Menampilkan menu interaktif berbasis nomor di terminal dengan status ringkas dan panduan jelas."""
+    cleanup_old_executables()
     if os.name == 'nt':
         os.system('')  # Mengaktifkan dukungan ANSI colors di Windows Console
+
+    print("🔍 Memeriksa pembaruan Logbook CLI...", flush=True)
+    update_info = check_latest_version(timeout=3)
 
     while True:
         # 1. Ambil status ringkas
@@ -500,9 +746,11 @@ def run_interactive_menu(config: dict):
             print(f"│  ⚠️ Antrean : {pending_count} draf tertunda (perlu dikirim ulang){' '*4}│")
         else:
             print(f"│  🟢 Antrean : Bersih (tidak ada draf tertunda){' '*10}│")
-        print("└────────────────────────────────────────────────────────┘\n")
-
-        print("PILIHAN MENU (Ketik angka menu yang diinginkan):\n")
+        print("└────────────────────────────────────────────────────────┘")
+        if update_info.get("has_update"):
+            latest_v = update_info.get('latest_version', '')
+            print(f"\n  \033[1;33m📢 Notifikasi: Versi baru v{latest_v} tersedia! Pilih menu [6] untuk update.\033[0m")
+        print("\nPILIHAN MENU (Ketik angka menu yang diinginkan):\n")
 
         print("  \033[1;36m[1] 🚀 Kirim Logbook Hari Ini\033[0m")
         print("      Membaca commit hari ini, buat ringkasan AI, lalu kirim draf ke Telegram VPS.\n")
@@ -523,17 +771,24 @@ def run_interactive_menu(config: dict):
         print("  \033[1;36m[5] 📅 Logbook Tanggal Tertentu\033[0m")
         print("      Membuat draf atau mengirim logbook untuk tanggal kustom lampau (YYYY-MM-DD).\n")
 
+        if update_info.get("has_update"):
+            print(f"  \033[1;32m[6] 🔄 Update Logbook CLI\033[0m \033[1;33m(🚀 Update Tersedia: v{update_info.get('latest_version')}!)\033[0m")
+            print("      Mengunduh dan memasang versi terbaru dari GitHub secara otomatis.\n")
+        else:
+            print(f"  \033[1;36m[6] 🔄 Update Logbook CLI\033[0m (Versi saat ini v{__version__} sudah terbaru)")
+            print("      Periksa atau instal ulang versi rilis terbaru dari repositori.\n")
+
         print("  \033[1;31m[0] ❌ Keluar\033[0m (atau ketik 'q')\n")
 
         # 3. Minta input nomor
         try:
-            choice = input("👉 Masukkan nomor pilihan [1-5, atau 0 untuk keluar]: ").strip()
+            choice = input("👉 Masukkan nomor pilihan [1-6, atau 0 untuk keluar]: ").strip()
         except (KeyboardInterrupt, EOFError):
             print("\n\n👋 Keluar dari Logbook CLI.")
             return
 
         if not choice:
-            print("\n⚠️ Pilihan tidak boleh kosong. Silakan masukkan angka 1 sampai 5 (atau 0 untuk keluar).")
+            print("\n⚠️ Pilihan tidak boleh kosong. Silakan masukkan angka 1 sampai 6 (atau 0 untuk keluar).")
             time.sleep(1.5)
             continue
 
@@ -541,8 +796,8 @@ def run_interactive_menu(config: dict):
             print("\n👋 Keluar dari Logbook CLI. Sampai jumpa!")
             return
 
-        if choice not in ('1', '2', '3', '4', '5'):
-            print(f"\n⚠️ Pilihan '{choice}' tidak valid. Silakan masukkan angka 1 sampai 5 (atau 0 untuk keluar).")
+        if choice not in ('1', '2', '3', '4', '5', '6', 'u', 'update'):
+            print(f"\n⚠️ Pilihan '{choice}' tidak valid. Silakan masukkan angka 1 sampai 6 (atau 0 untuk keluar).")
             time.sleep(1.8)
             continue
 
@@ -572,6 +827,12 @@ def run_interactive_menu(config: dict):
                 print("❌ Format tanggal tidak valid. Harus YYYY-MM-DD (contoh: 2026-10-28).")
             except (KeyboardInterrupt, EOFError):
                 print("\nOperasi dibatalkan.")
+        elif choice in ("6", "u", "update"):
+            print("🔄 PEMBARUAN LOGBOOK CLI")
+            print("-" * 65)
+            updated = perform_self_update(release_info=update_info)
+            if updated:
+                update_info = check_latest_version(timeout=3)
 
         print("\n" + "-" * 65)
         try:
@@ -581,6 +842,7 @@ def run_interactive_menu(config: dict):
             return
 
 def main():
+    cleanup_old_executables()
     base_parser = argparse.ArgumentParser(add_help=False)
     base_parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     base_parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH, help="Path ke file konfigurasi json")
@@ -605,6 +867,11 @@ def main():
     # send-pending
     subparsers.add_parser("send-pending", parents=[base_parser], help="Kirim ulang draf yang tertunda")
 
+    # update
+    p_upd = subparsers.add_parser("update", parents=[base_parser], help="Periksa dan perbarui Logbook CLI ke versi terbaru")
+    p_upd.add_argument("--check", action="store_true", help="Hanya cek versi terbaru tanpa melakukan update")
+    p_upd.add_argument("--force", action="store_true", help="Paksa download dan pasang ulang versi terbaru")
+
     args = parser.parse_args()
     config = load_config(args.config)
     if getattr(args, "insecure", False):
@@ -626,6 +893,8 @@ def main():
         cmd_run(args, config)
     elif args.command == "send-pending":
         cmd_send_pending(args, config)
+    elif args.command == "update":
+        cmd_update(args, config)
 
 if __name__ == "__main__":
     main()
