@@ -36,7 +36,7 @@ Aplikasi mandiri (*standalone executable*) untuk mahasiswa magang / PKL: membaca
 
 Sebelum menggunakan CLI di laptop, daftarkan akun DERMAGA Anda melalui bot Telegram untuk mendapatkan **API Token**:
 
-1. Buka bot Telegram `bot-services`.
+1. Buka bot Telegram [@oktanotif_bot](https://t.me/oktanotif_bot).
 2. Kirim perintah pendaftaran dengan format:
    ```text
    /daftar_logbook <NIM_atau_Username> <Password_DERMAGA>
@@ -217,9 +217,38 @@ Selain mode menu interaktif, Anda juga bisa menjalankan fungsi tertentu langsung
 
 | Perintah | Deskripsi |
 |---|---|
+| `logbook_cli --version` / `-v` | Tampilkan versi Logbook CLI saat ini. |
 | `logbook_cli scan` | Pindai semua folder proyek Git lokal & cek status commit hari ini. |
 | `logbook_cli preview` | Tampilkan draf ringkasan logbook hari ini di terminal (tanpa kirim ke Telegram). |
 | `logbook_cli preview --date 2026-10-25` | Preview draf logbook untuk tanggal spesifik lampau. |
 | `logbook_cli run` | Baca commit hari ini, buat ringkasan, dan langsung kirim draf ke Telegram. |
 | `logbook_cli run --no-ai` | Kirim draf dengan format peringkas manual tanpa OpenAI API. |
 | `logbook_cli send-pending` | Kirim ulang semua draf yang sebelumnya tertunda di antrean lokal. |
+
+---
+
+## 🚀 Alur Pengembangan & Rilis (Branching Strategy)
+
+Repositori ini menggunakan strategi cabang mandiri agar push rutin harian tidak memicu build yang tidak perlu:
+
+1. **Branch `dev` (Pengembangan Aktif)**:
+   - Gunakan branch `dev` untuk pekerjaan harian, perbaikan bug, atau penambahan fitur.
+   - GitHub Actions **tidak akan melakukan build** pada branch ini.
+   - Sebelum siap merilis ke pengguna, naikkan nomor versi di `logbook_cli.py`:
+     ```python
+     __version__ = "1.0.1"  # sesuaikan dengan Semantic Versioning
+     ```
+
+2. **Branch `main` (Rilis Produksi Otomatis)**:
+   - Ketika versi baru siap dipublikasikan, merge branch `dev` ke `main` dan push ke GitHub:
+     ```bash
+     git checkout main
+     git merge dev
+     git push origin main
+     ```
+   - GitHub Actions akan otomatis:
+     - Memvalidasi versi: jika tag `vX.Y.Z` sudah pernah dirilis, workflow akan dibatalkan/gagal (mencegah overwrite versi lama).
+     - Mengompilasi standalone binary untuk **Linux** (`.zip`) dan **Windows** (`.zip`).
+     - Membuat rilis arsip permanen dengan tag `vX.Y.Z` di GitHub Releases.
+     - Menyinkronkan tag `cli-latest` agar direct download link di atas selalu mengarah ke binary paling baru.
+

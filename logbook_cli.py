@@ -14,6 +14,8 @@ import socket
 from pathlib import Path
 from datetime import datetime
 
+__version__ = "1.0.0"
+
 # Prioritaskan IPv4 daripada IPv6 untuk menghindari kegagalan routing/NAT64 atau rekaman DNS AAAA yang bermasalah
 _orig_getaddrinfo = socket.getaddrinfo
 def _getaddrinfo_prefer_ipv4(*args, **kwargs):
@@ -491,7 +493,8 @@ def run_interactive_menu(config: dict):
         # 2. Gambar header status ringkas
         print("\033[2J\033[H", end="")
         print("┌────────────────────────────────────────────────────────┐")
-        print("│            🚀 Git Logbook Automation CLI               │")
+        title = f"🚀 Git Logbook Automation CLI v{__version__}"
+        print(f"│{title:^56}│")
         print(f"│  📅 Tanggal : {today_str:<39}  │")
         if pending_count > 0:
             print(f"│  ⚠️ Antrean : {pending_count} draf tertunda (perlu dikirim ulang){' '*4}│")
@@ -579,6 +582,7 @@ def run_interactive_menu(config: dict):
 
 def main():
     base_parser = argparse.ArgumentParser(add_help=False)
+    base_parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     base_parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH, help="Path ke file konfigurasi json")
     base_parser.add_argument("--insecure", action="store_true", help="Abaikan verifikasi sertifikat SSL")
 

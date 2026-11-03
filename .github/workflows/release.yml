@@ -12,8 +12,40 @@ on:
   workflow_dispatch:
 
 jobs:
+  check-version:
+    name: Check Version & Tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      tag_name: ${{ steps.get_version.outputs.tag_name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version and check tag existence
+        id: get_version
+        run: |
+          VERSION=$(python3 -c "import re; print(re.search(r'__version__\s*=\s*[\"\x27]([^\"\x27]+)[\"\x27]', open('logbook_cli.py').read()).group(1))")
+          if [ -z "$VERSION" ]; then
+            echo "::error::Variabel __version__ tidak ditemukan di logbook_cli.py!"
+            exit 1
+          fi
+          TAG_NAME="v$VERSION"
+          echo "Version: $VERSION"
+          echo "Tag Name: $TAG_NAME"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+
+          if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null || [ -n "$(git ls-remote --tags origin "refs/tags/$TAG_NAME")" ]; then
+            echo "::error::Tag $TAG_NAME sudah pernah dirilis di GitHub! Silakan naikkan nomor __version__ di logbook_cli.py sebelum merge ke main."
+            exit 1
+          fi
+
   build:
     name: Build Binary (${{ matrix.os }})
+    needs: check-version
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -70,8 +102,8 @@ jobs:
           path: ${{ matrix.artifact_name }}.zip
 
   release:
-    name: Publish Release (cli-latest)
-    needs: build
+    name: Publish Release (${{ needs.check-version.outputs.tag_name }})
+    needs: [check-version, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -86,19 +118,47 @@ jobs:
           path: release_assets
           merge-multiple: true
 
-      - name: Create or Update GitHub Release
+      - name: Create Versioned GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: cli-latest
-          name: "Logbook CLI (Latest)"
+          tag_name: ${{ needs.check-version.outputs.tag_name }}
+          name: "Logbook CLI ${{ needs.check-version.outputs.tag_name }}"
           body: |
-            ## 🚀 Logbook CLI Pre-built Packages
+            ## 🚀 Logbook CLI Release ${{ needs.check-version.outputs.tag_name }}
 
             Paket executable mandiri (standalone binary) untuk Logbook CLI Git automation. Anda tidak perlu menginstal Python di laptop untuk menjalankannya.
 
-            ### 📦 Unduhan Langsung
-            - 🪟 **Windows (x64)**: [`logbook-cli-windows-x64.zip`](https://github.com/Oktavian19/logbook-cli/releases/download/cli-latest/logbook-cli-windows-x64.zip)
-            - 🐧 **Linux (x64)**: [`logbook-cli-linux-x64.zip`](https://github.com/Oktavian19/logbook-cli/releases/download/cli-latest/logbook-cli-linux-x64.zip)
+            ### 📦 Unduhan Langsung (${{ needs.check-version.outputs.tag_name }})
+            - 🪟 **Windows (x64)**: [`logbook-cli-windows-x64.zip`](https://github.com/${{ github.repository }}/releases/download/${{ needs.check-version.outputs.tag_name }}/logbook-cli-windows-x64.zip)
+            - 🐧 **Linux (x64)**: [`logbook-cli-linux-x64.zip`](https://github.com/${{ github.repository }}/releases/download/${{ needs.check-version.outputs.tag_name }}/logbook-cli-linux-x64.zip)
+
+            ### 📝 Cara Penggunaan Singkat
+            1. Unduh dan ekstrak file ZIP sesuai sistem operasi Anda.
+            2. Salin template `config.example.json` menjadi `config.json`.
+            3. Masukkan `api_token` yang didapatkan dari bot Telegram (perintah `/token_logbook` atau `/daftar_logbook`).
+            4. Atur path repositori git Anda pada bagian `repositories`.
+            5. Jalankan melalui terminal / PowerShell:
+               - **Windows**: `.\logbook_cli.exe run`
+               - **Linux**: `./logbook_cli run`
+
+            Lihat `README.md` di dalam paket untuk petunjuk penjadwalan harian otomatis (Task Scheduler di Windows, systemd timer / cron di Linux).
+          draft: false
+          prerelease: false
+          files: release_assets/*.zip
+
+      - name: Update Latest Release (cli-latest)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: cli-latest
+          name: "Logbook CLI (Latest - ${{ needs.check-version.outputs.tag_name }})"
+          body: |
+            ## 🚀 Logbook CLI Pre-built Packages (Latest: ${{ needs.check-version.outputs.tag_name }})
+
+            Paket executable mandiri (standalone binary) untuk Logbook CLI Git automation. Anda tidak perlu menginstal Python di laptop untuk menjalankannya.
+
+            ### 📦 Unduhan Langsung (Versi Terbaru)
+            - 🪟 **Windows (x64)**: [`logbook-cli-windows-x64.zip`](https://github.com/${{ github.repository }}/releases/download/cli-latest/logbook-cli-windows-x64.zip)
+            - 🐧 **Linux (x64)**: [`logbook-cli-linux-x64.zip`](https://github.com/${{ github.repository }}/releases/download/cli-latest/logbook-cli-linux-x64.zip)
 
             ### 📝 Cara Penggunaan Singkat
             1. Unduh dan ekstrak file ZIP sesuai sistem operasi Anda.
